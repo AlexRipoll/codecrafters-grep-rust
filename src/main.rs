@@ -6,6 +6,7 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
     match pattern {
         p if p.chars().count() == 1 => input_line.contains(p),
         r"\d" => input_line.contains(|x: char| x.is_ascii_digit()),
+        r"\w" => input_line.contains(|x: char| x.is_alphanumeric()),
         _ => panic!("Unhandled pattern: {}", pattern),
     }
 }
