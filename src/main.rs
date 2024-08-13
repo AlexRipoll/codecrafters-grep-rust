@@ -6,8 +6,12 @@ use std::process;
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     match pattern {
         p if p.chars().count() == 1 => input_line.contains(p),
+        p if p.starts_with("[^") && p.ends_with(']') => {
+            let set: HashSet<char> = p[2..p.len() - 1].chars().collect();
+            !set.iter().any(|&char| input_line.contains(char))
+        }
         p if p.starts_with('[') && p.ends_with(']') => {
-            let set: HashSet<char> = p[1..p.len() - 2].chars().collect();
+            let set: HashSet<char> = p[1..p.len() - 1].chars().collect();
             set.iter().any(|&char| input_line.contains(char))
         }
         r"\d" => input_line.contains(|x: char| x.is_ascii_digit()),
