@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::io;
 use std::process;
@@ -5,6 +6,10 @@ use std::process;
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     match pattern {
         p if p.chars().count() == 1 => input_line.contains(p),
+        p if p.starts_with('[') && p.ends_with(']') => {
+            let set: HashSet<char> = p[1..p.len() - 2].chars().collect();
+            set.iter().any(|&char| input_line.contains(char))
+        }
         r"\d" => input_line.contains(|x: char| x.is_ascii_digit()),
         r"\w" => input_line.contains(|x: char| x.is_alphanumeric()),
         _ => panic!("Unhandled pattern: {}", pattern),
