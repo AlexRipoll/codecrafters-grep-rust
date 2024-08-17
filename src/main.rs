@@ -1,36 +1,73 @@
+use core::panic;
 use std::collections::HashSet;
 use std::env;
 use std::io;
 use std::process;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum CharacterClass {
+    Literal(char),
     CharGroup(String),
     NegativeCharGroup(String),
     Digit,
     Alphanumeric,
 }
 
-impl CharacterClass {
-    fn into_character_class(pattern: &str) -> Self {
-        match pattern {
-            p if p.starts_with("[^") && p.ends_with(']') => {
-                CharacterClass::NegativeCharGroup(p[2..p.len() - 1].chars().collect())
-            }
-            p if p.starts_with('[') && p.ends_with(']') => {
-                CharacterClass::CharGroup(p[1..p.len() - 1].chars().collect())
-            }
-            r"\d" => CharacterClass::Digit,
-            r"\w" => CharacterClass::Alphanumeric,
-            _ => panic!("Unhandled pattern: {}", pattern),
+fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
+    let mut char_classes: Vec<CharacterClass> = Vec::new();
+
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.next().unwrap() {
+                'd' => char_classes.push(CharacterClass::Digit),
+                'w' => char_classes.push(CharacterClass::Alphanumeric),
+                '\\' => char_classes.push(CharacterClass::Literal('\\')),
+                _ => panic!("invalid charactr class"),
+            },
+            '[' => match chars.next().unwrap() {
+                '^' => {
+                    let mut char_group: String = String::from("");
+
+                    while let Some(ch) = chars.next() {
+                        match ch {
+                            ']' => {
+                                char_classes.push(CharacterClass::NegativeCharGroup(char_group));
+                                break;
+                            }
+                            literal => {
+                                char_group = format!("{}{}", char_group, literal);
+                            }
+                        }
+                    }
+                }
+                n => {
+                    let mut char_group: String = String::from(n);
+
+                    while let Some(ch) = chars.next() {
+                        match ch {
+                            ']' => {
+                                char_classes.push(CharacterClass::CharGroup(char_group));
+                                break;
+                            }
+                            literal => {
+                                char_group = format!("{}{}", char_group, literal);
+                            }
+                        }
+                    }
+                }
+            },
+
+            literal => char_classes.push(CharacterClass::Literal(literal)),
         }
     }
 
-    // fn parse_pattern(pattern: &str) -> Self {}
+    char_classes
 }
 
 fn match_exists(input_line: &str, pattern: &str) -> bool {
-    let patterns = extract_pattern(pattern);
+    // let patterns = extract_pattern(pattern);
+    let patterns = parse_pattern(pattern);
 
     for i in 0..input_line.len() {
         if !match_pattern(&input_line[i..i + 1], &patterns[0]) {
@@ -53,37 +90,20 @@ fn match_exists(input_line: &str, pattern: &str) -> bool {
     false
 }
 
-fn match_pattern(input_line: &str, pattern: &str) -> bool {
+fn match_pattern(input_line: &str, pattern: &CharacterClass) -> bool {
     match pattern {
-        p if p.chars().count() == 1 => input_line.contains(p),
-        p if p.starts_with("[^") && p.ends_with(']') => {
-            let set: HashSet<char> = p[2..p.len() - 1].chars().collect();
+        CharacterClass::Literal(char) => input_line.contains(*char),
+        CharacterClass::NegativeCharGroup(group) => {
+            let set: HashSet<char> = group.chars().collect();
             !set.iter().any(|&char| input_line.contains(char))
         }
-        p if p.starts_with('[') && p.ends_with(']') => {
-            let set: HashSet<char> = p[1..p.len() - 1].chars().collect();
+        CharacterClass::CharGroup(group) => {
+            let set: HashSet<char> = group.chars().collect();
             set.iter().any(|&char| input_line.contains(char))
         }
-        r"\d" => input_line.contains(|x: char| x.is_ascii_digit()),
-        r"\w" => input_line.contains(|x: char| x.is_alphanumeric()),
-        _ => panic!("Unhandled pattern: {}", pattern),
+        CharacterClass::Digit => input_line.contains(|x: char| x.is_ascii_digit()),
+        CharacterClass::Alphanumeric => input_line.contains(|x: char| x.is_alphanumeric()),
     }
-}
-
-fn extract_pattern(pattern: &str) -> Vec<String> {
-    let mut chars = pattern.chars();
-
-    let mut pattern: Vec<String> = Vec::new();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            let char_class = format!("{}{}", ch.to_string(), chars.next().unwrap());
-            pattern.push(char_class);
-        } else {
-            pattern.push(ch.to_string());
-        }
-    }
-
-    pattern
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
@@ -107,26 +127,7 @@ fn main() {
 
 #[cfg(test)]
 mod test {
-    use crate::{extract_pattern, match_exists};
-
-    #[test]
-    fn test_extract_pattern() {
-        let pattern = "\\d\\d\\d apple";
-        assert_eq!(
-            extract_pattern(pattern),
-            vec![
-                "\\d".to_string(),
-                "\\d".to_string(),
-                "\\d".to_string(),
-                " ".to_string(),
-                "a".to_string(),
-                "p".to_string(),
-                "p".to_string(),
-                "l".to_string(),
-                "e".to_string()
-            ]
-        );
-    }
+    use crate::{match_exists, parse_pattern, CharacterClass};
 
     #[test]
     fn test_match_exists_end_to_end_match() {
@@ -158,5 +159,34 @@ mod test {
         let pattern = "\\d \\w\\w\\w\\ws";
 
         assert!(match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_excaped_back_slash() {
+        let input = "sally has 12 apples";
+        let pattern = r"\d\\d\\d apples";
+
+        assert!(!match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_parse_regexp() {
+        let pattern = r"\d\d\w [abc] 0xab[^xyz]";
+        assert_eq!(
+            parse_pattern(pattern),
+            vec![
+                CharacterClass::Digit,
+                CharacterClass::Digit,
+                CharacterClass::Alphanumeric,
+                CharacterClass::Literal(' '),
+                CharacterClass::CharGroup("abc".to_string()),
+                CharacterClass::Literal(' '),
+                CharacterClass::Literal('0'),
+                CharacterClass::Literal('x'),
+                CharacterClass::Literal('a'),
+                CharacterClass::Literal('b'),
+                CharacterClass::NegativeCharGroup("xyz".to_string()),
+            ]
+        );
     }
 }
