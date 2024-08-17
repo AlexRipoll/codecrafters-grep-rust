@@ -4,6 +4,25 @@ use std::env;
 use std::io;
 use std::process;
 
+// Usage: echo <input_text> | your_program.sh -E <pattern>
+fn main() {
+    if env::args().nth(1).unwrap() != "-E" {
+        println!("Expected first argument to be '-E'");
+        process::exit(1);
+    }
+
+    let pattern = env::args().nth(2).unwrap();
+    let mut input_line = String::new();
+
+    io::stdin().read_line(&mut input_line).unwrap();
+
+    if match_exists(&input_line, &pattern) {
+        process::exit(0)
+    } else {
+        process::exit(1)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum CharacterClass {
     Literal(char),
@@ -16,45 +35,26 @@ enum CharacterClass {
 fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
     let mut char_classes: Vec<CharacterClass> = Vec::new();
 
-    let mut chars = pattern.chars();
+    let mut chars = pattern.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
             '\\' => match chars.next().unwrap() {
                 'd' => char_classes.push(CharacterClass::Digit),
                 'w' => char_classes.push(CharacterClass::Alphanumeric),
                 '\\' => char_classes.push(CharacterClass::Literal('\\')),
+                '[' => char_classes.push(CharacterClass::Literal('[')),
                 _ => panic!("invalid charactr class"),
             },
-            '[' => match chars.next().unwrap() {
+            '[' => match chars.peek().unwrap() {
                 '^' => {
-                    let mut char_group: String = String::from("");
+                    chars.next();
 
-                    while let Some(ch) = chars.next() {
-                        match ch {
-                            ']' => {
-                                char_classes.push(CharacterClass::NegativeCharGroup(char_group));
-                                break;
-                            }
-                            literal => {
-                                char_group = format!("{}{}", char_group, literal);
-                            }
-                        }
-                    }
+                    let char_group = collect_until(&mut chars, ']');
+                    char_classes.push(CharacterClass::NegativeCharGroup(char_group));
                 }
-                n => {
-                    let mut char_group: String = String::from(n);
-
-                    while let Some(ch) = chars.next() {
-                        match ch {
-                            ']' => {
-                                char_classes.push(CharacterClass::CharGroup(char_group));
-                                break;
-                            }
-                            literal => {
-                                char_group = format!("{}{}", char_group, literal);
-                            }
-                        }
-                    }
+                _ => {
+                    let char_group = collect_until(&mut chars, ']');
+                    char_classes.push(CharacterClass::CharGroup(char_group));
                 }
             },
 
@@ -63,6 +63,20 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
     }
 
     char_classes
+}
+
+fn collect_until<I>(chars: &mut I, end_char: char) -> String
+where
+    I: Iterator<Item = char>,
+{
+    let mut result = String::new();
+    for ch in chars.by_ref() {
+        if ch == end_char {
+            return result;
+        }
+        result.push(ch);
+    }
+    panic!("unclosed group, expected '{}'", end_char)
 }
 
 fn match_exists(input_line: &str, pattern: &str) -> bool {
@@ -106,28 +120,30 @@ fn match_pattern(input_line: &str, pattern: &CharacterClass) -> bool {
     }
 }
 
-// Usage: echo <input_text> | your_program.sh -E <pattern>
-fn main() {
-    if env::args().nth(1).unwrap() != "-E" {
-        println!("Expected first argument to be '-E'");
-        process::exit(1);
-    }
-
-    let pattern = env::args().nth(2).unwrap();
-    let mut input_line = String::new();
-
-    io::stdin().read_line(&mut input_line).unwrap();
-
-    if match_exists(&input_line, &pattern) {
-        process::exit(0)
-    } else {
-        process::exit(1)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use crate::{match_exists, parse_pattern, CharacterClass};
+
+    #[test]
+    fn test_parse_regexp() {
+        let pattern = r"\d\d\w [abc] 0xab[^xyz]";
+        assert_eq!(
+            parse_pattern(pattern),
+            vec![
+                CharacterClass::Digit,
+                CharacterClass::Digit,
+                CharacterClass::Alphanumeric,
+                CharacterClass::Literal(' '),
+                CharacterClass::CharGroup("abc".to_string()),
+                CharacterClass::Literal(' '),
+                CharacterClass::Literal('0'),
+                CharacterClass::Literal('x'),
+                CharacterClass::Literal('a'),
+                CharacterClass::Literal('b'),
+                CharacterClass::NegativeCharGroup("xyz".to_string()),
+            ]
+        );
+    }
 
     #[test]
     fn test_match_exists_end_to_end_match() {
@@ -167,26 +183,5 @@ mod test {
         let pattern = r"\d\\d\\d apples";
 
         assert!(!match_exists(input, pattern));
-    }
-
-    #[test]
-    fn test_parse_regexp() {
-        let pattern = r"\d\d\w [abc] 0xab[^xyz]";
-        assert_eq!(
-            parse_pattern(pattern),
-            vec![
-                CharacterClass::Digit,
-                CharacterClass::Digit,
-                CharacterClass::Alphanumeric,
-                CharacterClass::Literal(' '),
-                CharacterClass::CharGroup("abc".to_string()),
-                CharacterClass::Literal(' '),
-                CharacterClass::Literal('0'),
-                CharacterClass::Literal('x'),
-                CharacterClass::Literal('a'),
-                CharacterClass::Literal('b'),
-                CharacterClass::NegativeCharGroup("xyz".to_string()),
-            ]
-        );
     }
 }
