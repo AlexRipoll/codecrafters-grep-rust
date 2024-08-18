@@ -31,6 +31,7 @@ enum CharacterClass {
     Digit,
     Alphanumeric,
     StartAnchor(char),
+    EndAnchor(Box<CharacterClass>),
 }
 
 fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
@@ -45,6 +46,7 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
                 '\\' => char_classes.push(CharacterClass::Literal('\\')),
                 '[' => char_classes.push(CharacterClass::Literal('[')),
                 '^' => char_classes.push(CharacterClass::Literal('^')),
+                '$' => char_classes.push(CharacterClass::Literal('$')),
                 _ => panic!("invalid charactr class"),
             },
             '[' => match chars.peek().unwrap() {
@@ -62,9 +64,23 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
             '^' => {
                 let starting_char = chars.next().unwrap();
                 if !char_classes.is_empty() {
-                    panic!("start fo string (^) anchor must be declared as the first pattern");
+                    panic!("start of string (^) anchor must be declared as the first pattern");
                 }
                 char_classes.push(CharacterClass::StartAnchor(starting_char));
+            }
+            '$' => {
+                // TODO:
+                // if !char_classes.is_empty() {
+                //     panic!("start fo string (^) anchor must be declared as the first pattern");
+                // }
+
+                // check if $ anchor is last pattern
+                if chars.peek().is_some() {
+                    panic!("end of string ($) anchor must be declared as the last pattern");
+                }
+                if let Some(char_class) = char_classes.pop() {
+                    char_classes.push(CharacterClass::EndAnchor(Box::new(char_class)));
+                }
             }
             literal => char_classes.push(CharacterClass::Literal(literal)),
         }
@@ -95,6 +111,14 @@ fn match_exists(input_line: &str, pattern: &str) -> bool {
             return false;
         }
     }
+    if let CharacterClass::EndAnchor(_) = patterns[patterns.len() - 1] {
+        if !match_pattern(
+            &input_line[input_line.len() - 1..input_line.len()],
+            &patterns[patterns.len() - 1],
+        ) {
+            return false;
+        }
+    }
 
     for i in 0..input_line.len() {
         if !match_pattern(&input_line[i..i + 1], &patterns[0]) {
@@ -109,6 +133,12 @@ fn match_exists(input_line: &str, pattern: &str) -> bool {
             }
 
             if j == patterns.len() - 1 {
+                if let Some(CharacterClass::EndAnchor(_)) = patterns.last() {
+                    // check if it's the end of the line
+                    if source.chars().nth(j + 1).is_some() {
+                        break;
+                    }
+                }
                 return true;
             }
         }
@@ -131,6 +161,7 @@ fn match_pattern(input_line: &str, pattern: &CharacterClass) -> bool {
         CharacterClass::Digit => input_line.contains(|x: char| x.is_ascii_digit()),
         CharacterClass::Alphanumeric => input_line.contains(|x: char| x.is_alphanumeric()),
         CharacterClass::StartAnchor(char) => input_line.starts_with(&char.to_string()),
+        CharacterClass::EndAnchor(char_class) => match_pattern(input_line, char_class),
     }
 }
 
@@ -213,5 +244,21 @@ mod test {
         let pattern = r"^log";
 
         assert!(!match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_end_of_string_anchor_literal_match() {
+        let input = "John Doe has more than 700 years of history";
+        let pattern = r"ry$";
+
+        assert!(match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_end_of_string_anchor_alphanumeric_match() {
+        let input = "John Doe has more than 700 years of history";
+        let pattern = r"\w$";
+
+        assert!(match_exists(input, pattern));
     }
 }
