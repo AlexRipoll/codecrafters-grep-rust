@@ -69,10 +69,9 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
                 char_classes.push(CharacterClass::StartAnchor(starting_char));
             }
             '$' => {
-                // TODO:
-                // if !char_classes.is_empty() {
-                //     panic!("start fo string (^) anchor must be declared as the first pattern");
-                // }
+                if !char_classes.is_empty() {
+                    panic!("end of string ($) anchor cannot be declared as the first pattern");
+                }
 
                 // check if $ anchor is last pattern
                 if chars.peek().is_some() {
