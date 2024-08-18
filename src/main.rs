@@ -16,7 +16,7 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if match_exists(&input_line, &pattern) {
+    if input_line.lines().any(|line| match_exists(line, &pattern)) {
         process::exit(0)
     } else {
         process::exit(1)
@@ -30,6 +30,7 @@ enum CharacterClass {
     NegativeCharGroup(String),
     Digit,
     Alphanumeric,
+    StartAnchor(char),
 }
 
 fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
@@ -43,6 +44,7 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
                 'w' => char_classes.push(CharacterClass::Alphanumeric),
                 '\\' => char_classes.push(CharacterClass::Literal('\\')),
                 '[' => char_classes.push(CharacterClass::Literal('[')),
+                '^' => char_classes.push(CharacterClass::Literal('^')),
                 _ => panic!("invalid charactr class"),
             },
             '[' => match chars.peek().unwrap() {
@@ -57,7 +59,13 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
                     char_classes.push(CharacterClass::CharGroup(char_group));
                 }
             },
-
+            '^' => {
+                let starting_char = chars.next().unwrap();
+                if char_classes.is_empty() {
+                    panic!("start fo string (^) anchor must be declared as the first pattern");
+                }
+                char_classes.push(CharacterClass::StartAnchor(starting_char));
+            }
             literal => char_classes.push(CharacterClass::Literal(literal)),
         }
     }
@@ -80,8 +88,13 @@ where
 }
 
 fn match_exists(input_line: &str, pattern: &str) -> bool {
-    // let patterns = extract_pattern(pattern);
     let patterns = parse_pattern(pattern);
+
+    if let CharacterClass::StartAnchor(_) = patterns[0] {
+        if !match_pattern(&input_line[0..1], &patterns[0]) {
+            return false;
+        }
+    }
 
     for i in 0..input_line.len() {
         if !match_pattern(&input_line[i..i + 1], &patterns[0]) {
@@ -117,6 +130,7 @@ fn match_pattern(input_line: &str, pattern: &CharacterClass) -> bool {
         }
         CharacterClass::Digit => input_line.contains(|x: char| x.is_ascii_digit()),
         CharacterClass::Alphanumeric => input_line.contains(|x: char| x.is_alphanumeric()),
+        CharacterClass::StartAnchor(char) => input_line.starts_with(&char.to_string()),
     }
 }
 
@@ -181,6 +195,22 @@ mod test {
     fn test_excaped_back_slash() {
         let input = "sally has 12 apples";
         let pattern = r"\d\\d\\d apples";
+
+        assert!(!match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_start_of_line_anchor_match() {
+        let input = "John Doe has more than 700 years of history";
+        let pattern = r"^J\w\w\w";
+
+        assert!(match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_start_of_line_anchor_mismatch() {
+        let input = "slog";
+        let pattern = r"^log";
 
         assert!(!match_exists(input, pattern));
     }
