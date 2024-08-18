@@ -261,4 +261,20 @@ mod test {
 
         assert!(match_exists(input, pattern));
     }
+
+    #[test]
+    fn test_end_of_string_anchor_digit_match() {
+        let input = "John Doe has more than 700 years of history :3";
+        let pattern = r"\d$";
+
+        assert!(match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_end_of_string_anchor_mismatch() {
+        let input = "cat, dog and more dogs";
+        let pattern = r"dog$";
+
+        assert!(!match_exists(input, pattern));
+    }
 }
