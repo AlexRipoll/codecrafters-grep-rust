@@ -61,7 +61,7 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
             },
             '^' => {
                 let starting_char = chars.next().unwrap();
-                if char_classes.is_empty() {
+                if !char_classes.is_empty() {
                     panic!("start fo string (^) anchor must be declared as the first pattern");
                 }
                 char_classes.push(CharacterClass::StartAnchor(starting_char));
