@@ -2,6 +2,7 @@ use core::panic;
 use std::collections::HashSet;
 use std::env;
 use std::io;
+use std::iter::Peekable;
 use std::process;
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
@@ -16,7 +17,10 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if input_line.lines().any(|line| match_exists(line, &pattern)) {
+    if input_line
+        .lines()
+        .any(|line| pattern_matches(line, &pattern))
+    {
         process::exit(0)
     } else {
         process::exit(1)
@@ -110,55 +114,38 @@ where
     panic!("unclosed group, expected '{}'", end_char)
 }
 
-fn match_exists(input_line: &str, pattern: &str) -> bool {
-    let patterns = parse_pattern(pattern);
+fn pattern_matches(input_str: &str, pattern_str: &str) -> bool {
+    let patterns = parse_pattern(pattern_str);
 
-    if let CharacterClass::StartAnchor(_) = patterns[0] {
-        if !match_pattern(&input_line[0..1], &patterns[0]) {
+    if let Some(CharacterClass::StartAnchor(_)) = patterns.get(0) {
+        if !match_pattern(&input_str[0..1], &patterns[0]) {
             return false;
         }
     }
-    if let CharacterClass::EndAnchor(_) = patterns[patterns.len() - 1] {
+
+    if let Some(CharacterClass::EndAnchor(_)) = patterns.last() {
         if !match_pattern(
-            &input_line[input_line.len() - 1..input_line.len()],
-            &patterns[patterns.len() - 1],
+            &input_str[input_str.len() - 1..input_str.len()],
+            &patterns.last().unwrap(),
         ) {
             return false;
         }
     }
 
-    for i in 0..input_line.len() {
-        if !match_pattern(&input_line[i..i + 1], &patterns[0]) {
-            continue;
-        }
-
-        let source = &input_line[i..];
-        let mut char_iter = source.chars().enumerate().peekable();
-
+    for i in 0..input_str.len() {
         let mut pattern_idx = 0;
-        while let Some((j, mut ch)) = char_iter.next() {
+        let mut input_chars = input_str[i..].chars().peekable();
+
+        while let Some(ch) = input_chars.next() {
             if !match_pattern(&ch.to_string(), &patterns[pattern_idx]) {
                 break;
             }
 
-            if let CharacterClass::OneOrMore(_) = &patterns[pattern_idx] {
-                let one_or_more_pattern = &patterns[pattern_idx];
-                while match_pattern(&ch.to_string(), &one_or_more_pattern) {
-                    if let Some((_, next_char)) = char_iter.peek() {
-                        if next_char != &ch {
-                            break;
-                        }
-                        ch = char_iter.next().unwrap().1;
-                    } else {
-                        break;
-                    }
-                }
-            }
+            handle_quantifier(&mut input_chars, &patterns[pattern_idx]);
 
             if pattern_idx == patterns.len() - 1 {
                 if let Some(CharacterClass::EndAnchor(_)) = patterns.last() {
-                    // check if it's the end of the line
-                    if source.chars().nth(j + 1).is_some() {
+                    if input_chars.peek().is_some() {
                         break;
                     }
                 }
@@ -170,6 +157,24 @@ fn match_exists(input_line: &str, pattern: &str) -> bool {
     }
 
     false
+}
+
+fn handle_quantifier<I>(char_iter: &mut Peekable<I>, pattern: &CharacterClass)
+where
+    I: Iterator<Item = char>,
+{
+    match pattern {
+        CharacterClass::OneOrMore(char_class) => {
+            while let Some(next_ch) = char_iter.peek() {
+                if match_pattern(&next_ch.to_string(), char_class) {
+                    char_iter.next();
+                } else {
+                    break;
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn match_pattern(input_line: &str, pattern: &CharacterClass) -> bool {
@@ -193,7 +198,7 @@ fn match_pattern(input_line: &str, pattern: &CharacterClass) -> bool {
 
 #[cfg(test)]
 mod test {
-    use crate::{match_exists, parse_pattern, CharacterClass};
+    use crate::{parse_pattern, pattern_matches, CharacterClass};
 
     #[test]
     fn test_parse_regexp() {
@@ -221,7 +226,7 @@ mod test {
         let input = "John Doe has more than 700 years of history";
         let pattern = "\\d\\d\\d years";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 
     #[test]
@@ -229,7 +234,7 @@ mod test {
         let input = "John Doe has more than 700 years of history";
         let pattern = "\\w\\d yea";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 
     #[test]
@@ -237,7 +242,7 @@ mod test {
         let input = "John Doe has more than 700 years of history";
         let pattern = "\\d\\d lorem";
 
-        assert!(!match_exists(input, pattern));
+        assert!(!pattern_matches(input, pattern));
     }
 
     #[test]
@@ -245,7 +250,7 @@ mod test {
         let input = "John Doe has more than 700 years of history";
         let pattern = "\\d \\w\\w\\w\\ws";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 
     #[test]
@@ -253,7 +258,7 @@ mod test {
         let input = "sally has 12 apples";
         let pattern = r"\d\\d\\d apples";
 
-        assert!(!match_exists(input, pattern));
+        assert!(!pattern_matches(input, pattern));
     }
 
     #[test]
@@ -261,7 +266,7 @@ mod test {
         let input = "John Doe has more than 700 years of history";
         let pattern = r"^J\w\w\w";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 
     #[test]
@@ -269,7 +274,7 @@ mod test {
         let input = "slog";
         let pattern = r"^log";
 
-        assert!(!match_exists(input, pattern));
+        assert!(!pattern_matches(input, pattern));
     }
 
     #[test]
@@ -277,7 +282,7 @@ mod test {
         let input = "John Doe has more than 700 years of history";
         let pattern = r"ry$";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 
     #[test]
@@ -285,7 +290,7 @@ mod test {
         let input = "John Doe has more than 700 years of history";
         let pattern = r"\w$";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 
     #[test]
@@ -293,7 +298,7 @@ mod test {
         let input = "John Doe has more than 700 years of history :3";
         let pattern = r"\d$";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 
     #[test]
@@ -301,14 +306,14 @@ mod test {
         let input = "cat, dog and more dogs";
         let pattern = r"dog$";
 
-        assert!(!match_exists(input, pattern));
+        assert!(!pattern_matches(input, pattern));
     }
 
     #[test]
     fn test_one_or_more_literal_match() {
-        let input = "Hellooooooooooo wooooooooooooorld!";
+        let input = "Hellooooooooooo wo!";
         let pattern = r"\w\wo+ \w";
 
-        assert!(match_exists(input, pattern));
+        assert!(pattern_matches(input, pattern));
     }
 }
