@@ -32,6 +32,7 @@ enum CharacterClass {
     Alphanumeric,
     StartAnchor(char),
     EndAnchor(Box<CharacterClass>),
+    OneOrMore(Box<CharacterClass>),
 }
 
 fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
@@ -47,6 +48,7 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
                 '[' => char_classes.push(CharacterClass::Literal('[')),
                 '^' => char_classes.push(CharacterClass::Literal('^')),
                 '$' => char_classes.push(CharacterClass::Literal('$')),
+                '+' => char_classes.push(CharacterClass::Literal('+')),
                 _ => panic!("invalid charactr class"),
             },
             '[' => match chars.peek().unwrap() {
@@ -69,16 +71,22 @@ fn parse_pattern(pattern: &str) -> Vec<CharacterClass> {
                 char_classes.push(CharacterClass::StartAnchor(starting_char));
             }
             '$' => {
-                if !char_classes.is_empty() {
-                    panic!("end of string ($) anchor cannot be declared as the first pattern");
-                }
-
                 // check if $ anchor is last pattern
                 if chars.peek().is_some() {
                     panic!("end of string ($) anchor must be declared as the last pattern");
                 }
+
                 if let Some(char_class) = char_classes.pop() {
                     char_classes.push(CharacterClass::EndAnchor(Box::new(char_class)));
+                }
+            }
+            '+' => {
+                if char_classes.is_empty() {
+                    panic!("quantifier (+) must be declared after another character class");
+                }
+
+                if let Some(char_class) = char_classes.pop() {
+                    char_classes.push(CharacterClass::OneOrMore(Box::new(char_class)));
                 }
             }
             literal => char_classes.push(CharacterClass::Literal(literal)),
@@ -125,13 +133,29 @@ fn match_exists(input_line: &str, pattern: &str) -> bool {
         }
 
         let source = &input_line[i..];
+        let mut char_iter = source.chars().enumerate().peekable();
 
-        for (j, ch) in source.chars().enumerate() {
-            if !match_pattern(&ch.to_string(), &patterns[j]) {
+        let mut pattern_idx = 0;
+        while let Some((j, mut ch)) = char_iter.next() {
+            if !match_pattern(&ch.to_string(), &patterns[pattern_idx]) {
                 break;
             }
 
-            if j == patterns.len() - 1 {
+            if let CharacterClass::OneOrMore(_) = &patterns[pattern_idx] {
+                let one_or_more_pattern = &patterns[pattern_idx];
+                while match_pattern(&ch.to_string(), &one_or_more_pattern) {
+                    if let Some((_, next_char)) = char_iter.peek() {
+                        if next_char != &ch {
+                            break;
+                        }
+                        ch = char_iter.next().unwrap().1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if pattern_idx == patterns.len() - 1 {
                 if let Some(CharacterClass::EndAnchor(_)) = patterns.last() {
                     // check if it's the end of the line
                     if source.chars().nth(j + 1).is_some() {
@@ -140,6 +164,8 @@ fn match_exists(input_line: &str, pattern: &str) -> bool {
                 }
                 return true;
             }
+
+            pattern_idx += 1;
         }
     }
 
@@ -161,6 +187,7 @@ fn match_pattern(input_line: &str, pattern: &CharacterClass) -> bool {
         CharacterClass::Alphanumeric => input_line.contains(|x: char| x.is_alphanumeric()),
         CharacterClass::StartAnchor(char) => input_line.starts_with(&char.to_string()),
         CharacterClass::EndAnchor(char_class) => match_pattern(input_line, char_class),
+        CharacterClass::OneOrMore(char_class) => match_pattern(input_line, char_class),
     }
 }
 
@@ -275,5 +302,13 @@ mod test {
         let pattern = r"dog$";
 
         assert!(!match_exists(input, pattern));
+    }
+
+    #[test]
+    fn test_one_or_more_literal_match() {
+        let input = "Hellooooooooooo wooooooooooooorld!";
+        let pattern = r"\w\wo+ \w";
+
+        assert!(match_exists(input, pattern));
     }
 }
